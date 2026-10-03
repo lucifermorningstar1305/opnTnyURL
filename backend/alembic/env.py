@@ -1,14 +1,19 @@
+# LICENSE HEADER MANAGED BY add-license-header
+#
+# Copyright (c) 2026 Adityam Ghosh
+# SPDX-License-Identifier: MIT
+#
+
 import os
 import sys
 from logging.config import fileConfig
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from sqlalchemy import engine_from_config, pool
-
 from alembic import context
 from app.config.config import Settings
 from app.models.tables import Base
+from sqlalchemy import engine_from_config, pool
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
