@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from valkey.asyncio import Valkey
 
-from app.bloom_ops.bloom_ops import ensure_bloom_filter
+from app.bloom_ops.bloom_ops import bloom_add, ensure_bloom_filter
 from app.config.config import Settings
 from app.db.cache_db import close_cache_connection, get_vlky, init_cache
 from app.db.db import get_session
@@ -69,6 +69,10 @@ async def add_original_url(
 ):
     try:
         res = await add_url(session=session, vlky=vlky, url=str(url.url).strip())
+        assert res is not None
+        await bloom_add(
+            conn=vlky, filter_name=Settings.VALKEY_BLOOM_FILTER_NAME, value=res
+        )
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={"success": True, "data": str(res), "error": None},
