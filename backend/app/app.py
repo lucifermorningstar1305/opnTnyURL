@@ -69,9 +69,10 @@ async def add_original_url(
 ):
     try:
         res = await add_url(session=session, vlky=vlky, url=str(url.url).strip())
-        assert res is not None
         await bloom_add(
-            conn=vlky, filter_name=Settings.VALKEY_BLOOM_FILTER_NAME, value=res
+            conn=vlky,
+            filter_name=Settings.VALKEY_BLOOM_FILTER_NAME,
+            value=str(url.url).strip(),
         )
         return JSONResponse(
             status_code=status.HTTP_200_OK,
