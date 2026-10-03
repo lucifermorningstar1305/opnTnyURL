@@ -1,6 +1,6 @@
 # opnTnyURL
 
-opnTnyURL is a simple URL shortener.
+opnTnyURL is a **self-hostable** simple URL shortener.
 
 ## Self-host
 
