@@ -27,8 +27,8 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           tags: |
-            ghcr.io/eurekai-org/opntnyurl-api:${{ github.event.release.tag_name }}
-            ghcr.io/eurekai-org/opntnyurl-api:latest
+            ghcr.io/lucifermorningstar1305/opntnyurl-api:${{ github.event.release.tag_name }}
+            ghcr.io/lucifermorningstar1305/opntnyurl-api:latest
 
   frontend:
     runs-on: ubuntu-latest
@@ -49,5 +49,5 @@ jobs:
           file: ./frontend/Dockerfile
           push: true
           tags: |
-            ghcr.io/eurekai-org/opntnyurl-frontend:${{ github.event.release.tag_name }}
-            ghcr.io/eurekai-org/opntnyurl-frontend:latest
+            ghcr.io/lucifermorningstar1305/opntnyurl-frontend:${{ github.event.release.tag_name }}
+            ghcr.io/lucifermorningstar1305/opntnyurl-frontend:latest
