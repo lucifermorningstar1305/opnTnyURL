@@ -1,0 +1,236 @@
+services:
+  traefik:
+    image: traefik:v3.6
+    container_name: opntnyurl-traefik
+    restart: unless-stopped
+
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+
+      # Redirect HTTP -> HTTPS
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+
+      # Let's Encrypt
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+
+    networks:
+      - proxy
+
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    container_name: opntnyurl-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    networks:
+      - internal
+
+  valkey:
+    image: ${VALKEY_IMAGE}
+    container_name: opntnyurl-valkey
+    restart: unless-stopped
+
+    command:
+      - valkey-server
+      - --requirepass
+      - ${VALKEY_PASSWORD}
+
+    volumes:
+      - valkey-data:/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a '${VALKEY_PASSWORD}' ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    networks:
+      - internal
+
+  migrate:
+    image: ghcr.io/lucifermorningstar1305/opntnyurl-api:${APP_VERSION}
+    container_name: opntnyurl-migrate
+
+    environment:
+      MACHINE_ID: ${MACHINE_ID}
+
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      VALKEY_HOST: valkey
+      VALKEY_PORT: "6379"
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      VALKEY_BLOOM_FILTER_NAME: ${VALKEY_BLOOM_FILTER_NAME}
+
+    command:
+      - alembic
+      - upgrade
+      - head
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: "no"
+
+    networks:
+      - internal
+
+  backend:
+    image: ghcr.io/lucifermorningstar1305/opntnyurl-api:${APP_VERSION}
+    container_name: opntnyurl-backend
+    restart: unless-stopped
+
+    environment:
+      MACHINE_ID: ${MACHINE_ID}
+
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      VALKEY_HOST: valkey
+      VALKEY_PORT: "6379"
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      VALKEY_BLOOM_FILTER_NAME: ${VALKEY_BLOOM_FILTER_NAME}
+
+    command:
+      - fastapi
+      - run
+      - --host
+      - 0.0.0.0
+      - --port
+      - "${BACKEND_PORT}"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      valkey:
+        condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
+
+    labels:
+      - "traefik.enable=true"
+
+      # --------------------------------------------------
+      # API
+      #
+      # https://${API_DOMAIN}/*
+      # --------------------------------------------------
+
+      - "traefik.http.routers.opntny-api.rule=Host(`${API_DOMAIN}`)"
+      - "traefik.http.routers.opntny-api.entrypoints=websecure"
+      - "traefik.http.routers.opntny-api.tls=true"
+      - "traefik.http.routers.opntny-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.opntny-api.service=opntny-backend"
+      - "traefik.http.routers.opntny-api.priority=50"
+
+      # --------------------------------------------------
+      # SHORT LINKS
+      #
+      # https://${APP_DOMAIN}/${MACHINE_ID}<base62>
+      #
+      # MACHINE_ID comes entirely from .env.
+      # --------------------------------------------------
+
+      - "traefik.http.routers.opntny-short.rule=Host(`${APP_DOMAIN}`) && PathRegexp(`^/${MACHINE_ID}[0-9A-Za-z]+$`)"
+      - "traefik.http.routers.opntny-short.entrypoints=websecure"
+      - "traefik.http.routers.opntny-short.tls=true"
+      - "traefik.http.routers.opntny-short.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.opntny-short.service=opntny-backend"
+      - "traefik.http.routers.opntny-short.priority=100"
+
+      # FastAPI listens here inside its container
+      - "traefik.http.services.opntny-backend.loadbalancer.server.port=${BACKEND_PORT}"
+
+    networks:
+      - proxy
+      - internal
+
+  frontend:
+    image: ghcr.io/lucifermorningstar1305/opntnyurl-frontend:${APP_VERSION}
+    container_name: opntnyurl-frontend
+    restart: unless-stopped
+
+    environment:
+      API_BASE_URL: https://${API_DOMAIN}
+      PUBLIC_BASE_URL: https://${APP_DOMAIN}
+
+    command:
+      - streamlit
+      - run
+      - app.py
+      - --server.address=0.0.0.0
+      - --server.port=${FRONTEND_PORT}
+
+    depends_on:
+      backend:
+        condition: service_started
+
+    labels:
+      - "traefik.enable=true"
+
+      # Everything on the main domain that isn't a short URL
+      # is handled by Streamlit.
+      - "traefik.http.routers.opntny-frontend.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.opntny-frontend.entrypoints=websecure"
+      - "traefik.http.routers.opntny-frontend.tls=true"
+      - "traefik.http.routers.opntny-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.opntny-frontend.service=opntny-frontend"
+      - "traefik.http.routers.opntny-frontend.priority=10"
+
+      - "traefik.http.services.opntny-frontend.loadbalancer.server.port=${FRONTEND_PORT}"
+
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    name: opntnyurl-proxy
+
+  internal:
+    name: opntnyurl-internal
+    internal: true
+
+volumes:
+  postgres-data:
+  valkey-data:
+  traefik-certs:
